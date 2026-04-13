@@ -1631,9 +1631,6 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
  
             args = [c1, c2, *args[1:]]
  
-        elif m in {AIFI, FocalModulation}:
-            args = [ch[f], *args]
-            c2 = args[0]
         elif m in (HGStem, HGBlock):
             c1, cm, c2 = ch[f], args[0], args[1]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
@@ -1653,13 +1650,6 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             c2 = sum(ch[x] for x in f)
         elif m is BiFPN_Concat3:
             c2 = sum(ch[x] for x in f)
-        elif m is CARAFE:
-            c1 = ch[f]
-            c2 = c1
-            args = [c1, *args]
-        elif m in {MLLAttention}:
-            c2 = ch[f]
-            args = [c2, *args]
         elif m in frozenset({Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn, v10Detect}):
             args.append([ch[x] for x in f])
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
