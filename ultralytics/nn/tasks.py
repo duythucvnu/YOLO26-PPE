@@ -11,8 +11,9 @@ import torch
 import torch.nn as nn
 
 from ultralytics.nn.autobackend import check_class_names
+from ultralytics.nn.backbone.BiFPN import *
+from ultralytics.nn.backbone.RepViT import *
 from ultralytics.nn.modules import (
-    AIFI,
     C1,
     C2,
     C2PSA,
@@ -20,20 +21,15 @@ from ultralytics.nn.modules import (
     C3TR,
     ELAN1,
     OBB,
-    OBB26,
     PSA,
     SPP,
     SPPELAN,
     SPPF,
-    A2C2f,
     AConv,
-    ADown,
     Bottleneck,
     BottleneckCSP,
     C2f,
     C2fAttn,
-    C2fCIB,
-    C2fPSA,
     C3Ghost,
     C3k2,
     C3x,
@@ -53,28 +49,20 @@ from ultralytics.nn.modules import (
     HGBlock,
     HGStem,
     ImagePoolingAttn,
-    Index,
     LRPCHead,
     Pose,
-    Pose26,
     RepC3,
     RepConv,
-    RepNCSPELAN4,
     RepVGGDW,
     ResNetLayer,
     RTDETRDecoder,
     SCDown,
     Segment,
-    Segment26,
-    TorchVision,
     WorldDetect,
     YOLOEDetect,
     YOLOESegment,
-    YOLOESegment26,
     v10Detect,
 )
-from ultralytics.nn.backbone.RepViT import *
-from ultralytics.nn.backbone.BiFPN import *
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, WINDOWS, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.utils.loss import (
@@ -161,54 +149,55 @@ class BaseModel(torch.nn.Module):
         return self._predict_once(x, profile, visualize, embed)
 
     def _predict_once(self, x, profile=False, visualize=False, embed=None):
-            """
-            Perform a forward pass through the network.
-            Args:
-                x (torch.Tensor): The input tensor to the model.
-                profile (bool):  Print the computation time of each layer if True, defaults to False.
-                visualize (bool): Save the feature maps of the model if True, defaults to False.
-                embed (list, optional): A list of feature vectors/embeddings to return.
-            Returns:
-                (torch.Tensor): The last output of the model.
-            """
-            y, dt, embeddings = [], [], []  # outputs
-            for idx, m in enumerate(self.model):
-                if m.f != -1:  # if not from previous layer
-                    x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-                if profile:
-                    self._profile_one_layer(m, x, dt)
-                if hasattr(m, 'backbone'):
-                    x = m(x)
-                    for _ in range(5 - len(x)):
-                        x.insert(0, None)
-                    for i_idx, i in enumerate(x):
-                        if i_idx in self.save:
-                            y.append(i)
-                        else:
-                            y.append(None)
-                    # print(f'layer id:{idx:>2} {m.type:>50} output shape:{", ".join([str(x_.size()) for x_ in x if x_ is not None])}')
-                    x = x[-1]
-                else:
-                    if isinstance(x, list):
-                        if "Head" in m.type or "Detect" in m.type:
-                            x = m(x)
-                        else:
-                            try:
-                                x = m(*x)
-                            except TypeError:
-                                x = m(x)
+        """Perform a forward pass through the network.
+
+        Args:
+            x (torch.Tensor): The input tensor to the model.
+            profile (bool): Print the computation time of each layer if True, defaults to False.
+            visualize (bool): Save the feature maps of the model if True, defaults to False.
+            embed (list, optional): A list of feature vectors/embeddings to return.
+
+        Returns:
+            (torch.Tensor): The last output of the model.
+        """
+        y, dt, embeddings = [], [], []  # outputs
+        for idx, m in enumerate(self.model):
+            if m.f != -1:  # if not from previous layer
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+            if profile:
+                self._profile_one_layer(m, x, dt)
+            if hasattr(m, "backbone"):
+                x = m(x)
+                for _ in range(5 - len(x)):
+                    x.insert(0, None)
+                for i_idx, i in enumerate(x):
+                    if i_idx in self.save:
+                        y.append(i)
                     else:
+                        y.append(None)
+                # print(f'layer id:{idx:>2} {m.type:>50} output shape:{", ".join([str(x_.size()) for x_ in x if x_ is not None])}')
+                x = x[-1]
+            else:
+                if isinstance(x, list):
+                    if "Head" in m.type or "Detect" in m.type:
                         x = m(x)
-                    #x = m(x)  # run
-                    y.append(x if m.i in self.save else None)  # save output
-                
-                if visualize:
-                    feature_visualization(x, m.type, m.i, save_dir=visualize)
-                if embed and m.i in embed:
-                    embeddings.append(nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
-                    if m.i == max(embed):
-                        return torch.unbind(torch.cat(embeddings, 1), dim=0)
-            return x
+                    else:
+                        try:
+                            x = m(*x)
+                        except TypeError:
+                            x = m(x)
+                else:
+                    x = m(x)
+                # x = m(x)  # run
+                y.append(x if m.i in self.save else None)  # save output
+
+            if visualize:
+                feature_visualization(x, m.type, m.i, save_dir=visualize)
+            if embed and m.i in embed:
+                embeddings.append(nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
+                if m.i == max(embed):
+                    return torch.unbind(torch.cat(embeddings, 1), dim=0)
+        return x
 
     def _predict_augment(self, x):
         """Perform augmentations on input image x and return augmented inference."""
@@ -1559,17 +1548,18 @@ def load_checkpoint(weight, device=None, inplace=True, fuse=False):
 
 
 def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
-    """
-    Parse a YOLO model.yaml dictionary into a PyTorch model.
+    """Parse a YOLO model.yaml dictionary into a PyTorch model.
+
     Args:
         d (dict): Model dictionary.
         ch (int): Input channels.
         verbose (bool): Whether to print model details.
+
     Returns:
         (tuple): Tuple containing the PyTorch model and sorted list of output layers.
     """
     import ast
- 
+
     # Args
     max_channels = float("inf")
     nc, act, scales = (d.get(x) for x in ("nc", "activation", "scales"))
@@ -1577,18 +1567,18 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
     if scales:
         scale = d.get("scale")
         if not scale:
-            scale = tuple(scales.keys())[0]
+            scale = next(iter(scales.keys()))
             LOGGER.warning(f"WARNING ⚠️ no model scale passed. Assuming scale='{scale}'.")
         if len(scales[scale]) == 3:
             depth, width, max_channels = scales[scale]
         elif len(scales[scale]) == 4:
             depth, width, max_channels, threshold = scales[scale]
- 
+
     if act:
         Conv.default_act = eval(act)  # redefine default activation, i.e. Conv.default_act = nn.SiLU()
         if verbose:
             LOGGER.info(f"{colorstr('activation:')} {act}")  # print
- 
+
     if verbose:
         LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<60}{'arguments':<50}")
     ch = [ch]
@@ -1596,13 +1586,13 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
     is_backbone = False
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
         try:
-            if m == 'node_mode':
+            if m == "node_mode":
                 m = d[m]
                 if len(args) > 0:
-                    if args[0] == 'head_channel':
+                    if args[0] == "head_channel":
                         args[0] = int(d[args[0]])
             t = m
-            m = getattr(torch.nn, m[3:]) if 'nn.' in m else globals()[m]  # get module
+            m = getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]  # get module
         except:
             pass
         for j, a in enumerate(args):
@@ -1614,11 +1604,38 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                         args[j] = a
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
         if m in {
-            Classify, Conv, ConvTranspose, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
-            BottleneckCSP, C1, C2, C2f, ELAN1, AConv, SPPELAN, C2fAttn, C3, C3TR, C2PSA, C3k2,
-            C3Ghost, nn.Conv2d, nn.ConvTranspose2d, DWConvTranspose2d, C3x, RepC3, PSA, SCDown,
+            Classify,
+            Conv,
+            ConvTranspose,
+            GhostConv,
+            Bottleneck,
+            GhostBottleneck,
+            SPP,
+            SPPF,
+            DWConv,
+            Focus,
+            BottleneckCSP,
+            C1,
+            C2,
+            C2f,
+            ELAN1,
+            AConv,
+            SPPELAN,
+            C2fAttn,
+            C3,
+            C3TR,
+            C2PSA,
+            C3k2,
+            C3Ghost,
+            nn.Conv2d,
+            nn.ConvTranspose2d,
+            DWConvTranspose2d,
+            C3x,
+            RepC3,
+            PSA,
+            SCDown,
         }:
-            if args[0] == 'head_channel':
+            if args[0] == "head_channel":
                 args[0] = d[args[0]]
             c1, c2 = ch[f], args[0]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
@@ -1628,9 +1645,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 args[2] = int(
                     max(round(min(args[2], max_channels // 2 // 32)) * width, 1) if args[2] > 1 else args[2]
                 )  # num heads
- 
+
             args = [c1, c2, *args[1:]]
- 
+
         elif m in (HGStem, HGBlock):
             c1, cm, c2 = ch[f], args[0], args[1]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
@@ -1663,31 +1680,38 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         elif isinstance(m, str):
             t = m
             if len(args) == 2:
-                m = timm.create_model(m, pretrained=args[0], pretrained_cfg_overlay={'file': args[1]},
-                                      features_only=True)
+                m = timm.create_model(
+                    m, pretrained=args[0], pretrained_cfg_overlay={"file": args[1]}, features_only=True
+                )
             elif len(args) == 1:
                 m = timm.create_model(m, pretrained=args[0], features_only=True)
             c2 = m.feature_info.channels()
-        elif m in {repvit_m0_9, repvit_m1_0, repvit_m1_1, repvit_m1_5, repvit_m2_3,}:
+        elif m in {
+            repvit_m0_9,
+            repvit_m1_0,
+            repvit_m1_1,
+            repvit_m1_5,
+            repvit_m2_3,
+        }:
             m = m(*args)
             c2 = m.channel
         else:
             c2 = ch[f]
- 
- 
+
         if isinstance(c2, list):
             is_backbone = True
             m_ = m
             m_.backbone = True
         else:
             m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
-            t = str(m)[8:-2].replace('__main__.', '')  # module type
+            t = str(m)[8:-2].replace("__main__.", "")  # module type
         m.np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type = i + 4 if is_backbone else i, f, t  # attach index, 'from' index, type
         if verbose:
-            LOGGER.info(f"{i:>3}{str(f):>20}{n_:>3}{m.np:10.0f}  {t:<60}{str(args):<50}")  # print
-        save.extend(x % (i + 4 if is_backbone else i) for x in ([f] if isinstance(f, int) else f) if
-                    x != -1)  # append to savelist
+            LOGGER.info(f"{i:>3}{f!s:>20}{n_:>3}{m.np:10.0f}  {t:<60}{args!s:<50}")  # print
+        save.extend(
+            x % (i + 4 if is_backbone else i) for x in ([f] if isinstance(f, int) else f) if x != -1
+        )  # append to savelist
         layers.append(m_)
         if i == 0:
             ch = []
@@ -1870,6 +1894,7 @@ def parse_model(d, ch, verbose=True):
             
     return torch.nn.Sequential(*layers), sorted(save)
 """
+
 
 def yaml_model_load(path):
     """Load a YOLO model from a YAML file.
