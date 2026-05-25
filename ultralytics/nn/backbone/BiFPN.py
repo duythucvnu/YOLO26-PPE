@@ -1,13 +1,10 @@
-import math
-
-import numpy as np
 import torch
 import torch.nn as nn
 
 
 class BiFPN_Concat2(nn.Module):
     def __init__(self, dimension=1):
-        super(BiFPN_Concat2, self).__init__()
+        super().__init__()
         self.d = dimension
         self.w = nn.Parameter(torch.ones(2, dtype=torch.float32), requires_grad=True)
         self.epsilon = 0.0001
@@ -21,7 +18,7 @@ class BiFPN_Concat2(nn.Module):
 
 class BiFPN_Concat3(nn.Module):
     def __init__(self, dimension=1):
-        super(BiFPN_Concat3, self).__init__()
+        super().__init__()
         self.d = dimension
         self.w = nn.Parameter(torch.ones(3, dtype=torch.float32), requires_grad=True)
         self.epsilon = 0.0001
